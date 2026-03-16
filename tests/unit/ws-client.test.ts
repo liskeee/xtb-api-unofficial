@@ -279,7 +279,7 @@ describe('CAS auth flow', () => {
   });
 
   it('CAS v1 URL format is correct', () => {
-    const tgt = 'TGT-550101-test-xstation.xtb.com';
+    const tgt = 'TGT-123456-test-xstation.xtb.com';
     const url = `https://xstation.xtb.com/signon/v1/tickets/${tgt}`;
     expect(url).toContain('/v1/tickets/TGT-');
   });
