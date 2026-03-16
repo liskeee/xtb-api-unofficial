@@ -1,5 +1,11 @@
 # xtb-api-unofficial
 
+[![CI](https://github.com/liskeee/xtb-api-unofficial/actions/workflows/ci.yml/badge.svg)](https://github.com/liskeee/xtb-api-unofficial/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/xtb-api-unofficial.svg)](https://www.npmjs.com/package/xtb-api-unofficial)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+
 > ⚠️ **Unofficial** — Reverse-engineered from xStation5. Not affiliated with XTB. Use at your own risk.
 
 Unofficial TypeScript/Node.js client for XTB's xStation5 trading platform.
@@ -163,6 +169,18 @@ This is an **unofficial**, community-driven project. It is NOT affiliated with, 
 ## Reverse Engineering
 
 See [RESEARCH.md](./RESEARCH.md) for detailed technical findings about xStation5's internal architecture, WebSocket protocol, and CAS authentication flow.
+
+## API Documentation
+
+Full API documentation is auto-generated from source code using TypeDoc:
+
+👉 **[View API Docs](https://liskeee.github.io/xtb-api-unofficial/)**
+
+To generate locally:
+
+```bash
+npm run docs
+```
 
 ## Contributing
 
