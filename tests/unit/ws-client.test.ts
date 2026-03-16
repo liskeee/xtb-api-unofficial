@@ -49,10 +49,10 @@ describe('WS Protocol message formats', () => {
           endpoint: '',
           registerClientInfo: {
             clientInfo: {
-              appName: 'xStation5',
-              appVersion: '2.94.1',
+              appName: 'xStation5',    // default; configurable via WSClientConfig.appName
+              appVersion: '2.94.1',   // default; configurable via WSClientConfig.appVersion
               appBuildNumber: '0',
-              device: 'Linux x86_64',
+              device: 'Linux x86_64', // default; configurable via WSClientConfig.device
               osVersion: '',
               comment: 'Node.js',
               apiVersion: '2.73.0',
@@ -65,6 +65,39 @@ describe('WS Protocol message formats', () => {
     };
     expect(msg.command[0].CoreAPI.registerClientInfo.clientInfo.appName).toBe('xStation5');
     expect(msg.command[0].CoreAPI.endpoint).toBe('');
+  });
+
+  it('supports configurable appName, appVersion, device via XTBWebSocketClient', async () => {
+    const { XTBWebSocketClient } = await import('../../src/ws/ws-client.js');
+
+    // Instantiate with custom config — constructor merges defaults
+    const client = new XTBWebSocketClient({
+      url: 'wss://fake.test/ws',
+      accountNumber: 99999999,
+      appName: 'MyApp',
+      appVersion: '1.0.0',
+      device: 'Windows NT 10.0',
+    });
+
+    // Access internal config via any-cast to verify it propagated
+    const cfg = (client as any).config;
+    expect(cfg.appName).toBe('MyApp');
+    expect(cfg.appVersion).toBe('1.0.0');
+    expect(cfg.device).toBe('Windows NT 10.0');
+  });
+
+  it('uses correct defaults when no custom identity provided', async () => {
+    const { XTBWebSocketClient } = await import('../../src/ws/ws-client.js');
+
+    const client = new XTBWebSocketClient({
+      url: 'wss://fake.test/ws',
+      accountNumber: 99999999,
+    });
+
+    const cfg = (client as any).config;
+    expect(cfg.appName).toBe('xStation5');
+    expect(cfg.appVersion).toBe('2.94.1');
+    expect(cfg.device).toBe('Linux x86_64');
   });
 
   it('builds correct loginWithServiceTicket request', () => {

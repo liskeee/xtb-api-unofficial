@@ -141,6 +141,9 @@ export class XTBWebSocketClient extends EventEmitter {
       pingInterval: 10000,
       autoReconnect: true,
       maxReconnectDelay: 30000,
+      appName: 'xStation5',
+      appVersion: '2.94.1',
+      device: 'Linux x86_64',
       ...config
     };
 
@@ -396,10 +399,10 @@ export class XTBWebSocketClient extends EventEmitter {
    */
   async registerClientInfo(): Promise<WSResponse> {
     const clientInfo: ClientInfo = {
-      appName: 'xStation5',
-      appVersion: '2.94.1',
+      appName: this.config.appName!,
+      appVersion: this.config.appVersion!,
       appBuildNumber: '0',
-      device: 'Linux x86_64',
+      device: this.config.device!,
       osVersion: '',
       comment: 'Node.js',
       apiVersion: '2.73.0',

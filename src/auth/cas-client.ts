@@ -18,6 +18,8 @@ export interface CASClientConfig {
   baseUrl?: string;
   /** Timezone offset for CAS v2. Default: auto-detected */
   timezoneOffset?: string;
+  /** User-Agent header for CAS requests. Default: 'xStation5/2.94.1 (Linux x86_64)' */
+  userAgent?: string;
 }
 
 /**
@@ -37,6 +39,7 @@ export class CASClient {
     this.config = {
       baseUrl: 'https://xstation.xtb.com/signon/',
       timezoneOffset: this.getTimezoneOffset(),
+      userAgent: 'xStation5/2.94.1 (Linux x86_64)',
       ...config,
     };
   }
@@ -79,7 +82,7 @@ export class CASClient {
    */
   private async loginV2(email: string, password: string): Promise<CASLoginResult> {
     const ticketsUrl = new URL('v2/tickets', this.config.baseUrl);
-    const userAgent = 'xStation5/2.94.1 (Linux x86_64)';
+    const userAgent = this.config.userAgent;
     const fingerprint = this.generateFingerprint(userAgent);
 
     const payload = {
@@ -172,7 +175,7 @@ export class CASClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'xStation5/2.94.1 (Linux x86_64)',
+        'User-Agent': this.config.userAgent,
       },
       body: formData,
       redirect: 'manual', // Don't follow redirects to extract Location header
@@ -225,7 +228,7 @@ export class CASClient {
       code,      // [REDACTED] - OTP code
     };
 
-    const userAgent = 'xStation5/2.94.1 (Linux x86_64)';
+    const userAgent = this.config.userAgent;
     const fingerprint = this.generateFingerprint(userAgent);
 
     const response = await fetch(twoFactorUrl.toString(), {
@@ -290,7 +293,7 @@ export class CASClient {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'xStation5/2.94.1 (Linux x86_64)',
+        'User-Agent': this.config.userAgent,
         'Cookie': `CASTGC=${tgt}`,
       },
       body: formData,
@@ -327,7 +330,7 @@ export class CASClient {
       headers: {
         'Content-Type': 'application/json',
         'Time-Zone': this.config.timezoneOffset,
-        'User-Agent': 'xStation5/2.94.1 (Linux x86_64)',
+        'User-Agent': this.config.userAgent,
         'Cookie': `CASTGC=${tgt}`,
       },
       body: JSON.stringify(payload),

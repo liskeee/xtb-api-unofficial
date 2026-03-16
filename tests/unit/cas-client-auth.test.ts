@@ -14,6 +14,37 @@ describe('CASClient 2FA Authentication', () => {
     mockFetch.mockReset();
   });
 
+  describe('Configurable userAgent', () => {
+    it('uses default userAgent when not configured', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ loginPhase: 'TGT_CREATED', ticket: 'TGT-test' })
+      } as Response);
+
+      await client.login('test@example.com', 'password');
+
+      const callArgs = mockFetch.mock.calls[0];
+      expect((callArgs[1] as RequestInit).headers).toMatchObject({
+        'User-Agent': 'xStation5/2.94.1 (Linux x86_64)',
+      });
+    });
+
+    it('uses custom userAgent when configured', async () => {
+      const customClient = new CASClient({ userAgent: 'CustomApp/1.0.0 (Windows NT 10.0)' });
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ loginPhase: 'TGT_CREATED', ticket: 'TGT-test' })
+      } as Response);
+
+      await customClient.login('test@example.com', 'password');
+
+      const callArgs = mockFetch.mock.calls[0];
+      expect((callArgs[1] as RequestInit).headers).toMatchObject({
+        'User-Agent': 'CustomApp/1.0.0 (Windows NT 10.0)',
+      });
+    });
+  });
+
   describe('Fingerprint Generation', () => {
     it('generates SHA-256 fingerprint from user agent', () => {
       // Access private method via reflection for testing
