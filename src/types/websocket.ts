@@ -229,6 +229,12 @@ export interface WSClientConfig {
   autoReconnect?: boolean;
   /** Maximum reconnection delay in milliseconds (default: 30000) */
   maxReconnectDelay?: number;
+  /** Application name sent in registerClientInfo (default: 'xStation5') */
+  appName?: string;
+  /** Application version sent in registerClientInfo (default: '2.94.1') */
+  appVersion?: string;
+  /** Device string sent in registerClientInfo (default: 'Linux x86_64') */
+  device?: string;
   /** Authentication options (required for most operations) */
   auth?: WSAuthOptions;
 }
@@ -256,10 +262,10 @@ export type SymbolKey = string;
  * @example
  * ```ts
  * const clientInfo: ClientInfo = {
- *   appName: 'xStation5',
- *   appVersion: '2.94.1',
+ *   appName: 'xStation5',    // default; configurable via WSClientConfig.appName
+ *   appVersion: '2.94.1',   // default; configurable via WSClientConfig.appVersion
  *   appBuildNumber: '0',
- *   device: 'Linux x86_64',
+ *   device: 'Linux x86_64', // default; configurable via WSClientConfig.device
  *   osVersion: '',
  *   comment: 'Node.js WebSocket Client',
  *   apiVersion: '2.73.0',

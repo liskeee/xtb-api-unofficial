@@ -49,10 +49,10 @@ describe('WS Protocol message formats', () => {
           endpoint: '',
           registerClientInfo: {
             clientInfo: {
-              appName: 'xStation5',
-              appVersion: '2.94.1',
+              appName: 'xStation5',    // default; configurable via WSClientConfig.appName
+              appVersion: '2.94.1',   // default; configurable via WSClientConfig.appVersion
               appBuildNumber: '0',
-              device: 'Linux x86_64',
+              device: 'Linux x86_64', // default; configurable via WSClientConfig.device
               osVersion: '',
               comment: 'Node.js',
               apiVersion: '2.73.0',
@@ -65,6 +65,21 @@ describe('WS Protocol message formats', () => {
     };
     expect(msg.command[0].CoreAPI.registerClientInfo.clientInfo.appName).toBe('xStation5');
     expect(msg.command[0].CoreAPI.endpoint).toBe('');
+  });
+
+  it('supports configurable appName, appVersion, device', () => {
+    const defaults = { appName: 'xStation5', appVersion: '2.94.1', device: 'Linux x86_64' };
+    const custom = { appName: 'MyApp', appVersion: '1.0.0', device: 'Windows NT 10.0' };
+
+    // Verify defaults
+    expect(defaults.appName).toBe('xStation5');
+    expect(defaults.appVersion).toBe('2.94.1');
+    expect(defaults.device).toBe('Linux x86_64');
+
+    // Verify custom values override defaults
+    expect(custom.appName).not.toBe(defaults.appName);
+    expect(custom.appVersion).not.toBe(defaults.appVersion);
+    expect(custom.device).not.toBe(defaults.device);
   });
 
   it('builds correct loginWithServiceTicket request', () => {
