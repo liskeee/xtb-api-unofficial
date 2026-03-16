@@ -67,19 +67,37 @@ describe('WS Protocol message formats', () => {
     expect(msg.command[0].CoreAPI.endpoint).toBe('');
   });
 
-  it('supports configurable appName, appVersion, device', () => {
-    const defaults = { appName: 'xStation5', appVersion: '2.94.1', device: 'Linux x86_64' };
-    const custom = { appName: 'MyApp', appVersion: '1.0.0', device: 'Windows NT 10.0' };
+  it('supports configurable appName, appVersion, device via XTBWebSocketClient', async () => {
+    const { XTBWebSocketClient } = await import('../../src/ws/ws-client.js');
 
-    // Verify defaults
-    expect(defaults.appName).toBe('xStation5');
-    expect(defaults.appVersion).toBe('2.94.1');
-    expect(defaults.device).toBe('Linux x86_64');
+    // Instantiate with custom config — constructor merges defaults
+    const client = new XTBWebSocketClient({
+      url: 'wss://fake.test/ws',
+      accountNumber: 99999999,
+      appName: 'MyApp',
+      appVersion: '1.0.0',
+      device: 'Windows NT 10.0',
+    });
 
-    // Verify custom values override defaults
-    expect(custom.appName).not.toBe(defaults.appName);
-    expect(custom.appVersion).not.toBe(defaults.appVersion);
-    expect(custom.device).not.toBe(defaults.device);
+    // Access internal config via any-cast to verify it propagated
+    const cfg = (client as any).config;
+    expect(cfg.appName).toBe('MyApp');
+    expect(cfg.appVersion).toBe('1.0.0');
+    expect(cfg.device).toBe('Windows NT 10.0');
+  });
+
+  it('uses correct defaults when no custom identity provided', async () => {
+    const { XTBWebSocketClient } = await import('../../src/ws/ws-client.js');
+
+    const client = new XTBWebSocketClient({
+      url: 'wss://fake.test/ws',
+      accountNumber: 99999999,
+    });
+
+    const cfg = (client as any).config;
+    expect(cfg.appName).toBe('xStation5');
+    expect(cfg.appVersion).toBe('2.94.1');
+    expect(cfg.device).toBe('Linux x86_64');
   });
 
   it('builds correct loginWithServiceTicket request', () => {
