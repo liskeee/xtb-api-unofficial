@@ -26,3 +26,60 @@ jobs:
       - run: npm run build
       - run: npm run lint
       - run: npm test
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: npm audit (production deps)
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Check for secrets in code
+        run: |
+          echo "Scanning for hardcoded secrets..."
+          # Patterns that must NOT appear in source code
+          if grep -rn --include="*.ts" --include="*.md" --include="*.json" -E             'TGT-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{30,}|npm_[A-Za-z0-9]{30,}'             src/ README.md CONTRIBUTING.md RESEARCH.md 2>/dev/null; then
+            echo "❌ Potential secrets found!"
+            exit 1
+          fi
+          echo "✅ No secrets found"
+
+      - name: Check for hardcoded credentials
+        run: |
+          echo "Checking for hardcoded credentials..."
+          if grep -rn --include="*.ts" -E             "(password|secret|apiKey)\s*[:=]\s*["'][^"']{8,}["']"             src/ 2>/dev/null | grep -v "param\|option\|interface\|type\|TODO\|JSDoc"; then
+            echo "❌ Hardcoded credentials found!"
+            exit 1
+          fi
+          echo "✅ No hardcoded credentials"
+
+      - name: Check for real account numbers in tests
+        run: |
+          echo "Checking test files for real data..."
+          # Block known real account number patterns (8+ digit sequences NOT in test placeholders)
+          if grep -rn --include="*.ts" -E "[^1-9]5198[0-9]{4}[^0-9]" tests/ 2>/dev/null; then
+            echo "❌ Possible real account number in tests!"
+            exit 1
+          fi
+          echo "✅ No real account numbers in tests"
+
+      - name: Validate package.json integrity
+        run: |
+          node -e "
+          const p = require('./package.json');
+          const required = ['name','version','description','license','repository','keywords','engines'];
+          const missing = required.filter(k => !p[k]);
+          if (missing.length) {
+            console.error('Missing package.json fields:', missing);
+            process.exit(1);
+          }
+          console.log('✅ package.json valid');
+          "
