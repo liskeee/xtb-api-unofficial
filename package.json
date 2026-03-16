@@ -1,0 +1,56 @@
+{
+  "name": "xtb-api-unofficial",
+  "version": "0.1.0",
+  "description": "Unofficial XTB xStation5 API client - reverse engineered WebSocket & Browser automation",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "xtb",
+    "xstation5",
+    "trading",
+    "api",
+    "unofficial",
+    "websocket",
+    "broker"
+  ],
+  "author": "liskeee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liskeee/xtb-api-unofficial"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "playwright-core": "^1.45.0",
+    "ws": "^8.17.0"
+  }
+}
