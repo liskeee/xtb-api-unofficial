@@ -7,6 +7,7 @@ import {
   type InstrumentSearchResult, type TradeOptions, type TradeResult,
   type INewMarketOrderEvent, type INewMarketOrder, type ISize,
   type ClientInfo, type XLoginResult, type WSPushMessage,
+  type CASLoginResult,
 } from '../types/index.js';
 import { CASClient } from '../auth/index.js';
 import { buildAccountId, priceFromDecimal, volumeFrom, sleep } from '../utils.js';
@@ -69,6 +70,11 @@ export interface XTBWebSocketClient {
    * @param symbol - Symbol data
    */
   on(event: 'symbol', listener: (symbol: any) => void): this;
+  /**
+   * Emitted when two-factor authentication is required.
+   * @param sessionData - 2FA session data with sessionId and available methods
+   */
+  on(event: 'requires_2fa', listener: (sessionData: { sessionId: string; methods: string[]; expiresAt: number }) => void): this;
 }
 
 /**
@@ -248,6 +254,18 @@ export class XTBWebSocketClient extends EventEmitter {
     } else if (auth.credentials) {
       if (!this.casClient) this.casClient = new CASClient();
       const loginResult = await this.casClient.login(auth.credentials.email, auth.credentials.password);
+
+      if (loginResult.type === 'requires_2fa') {
+        // Emit 2FA required event and wait for user to provide code
+        this.emit('requires_2fa', {
+          sessionId: loginResult.sessionId,
+          methods: loginResult.methods,
+          expiresAt: loginResult.expiresAt,
+        });
+        return; // Don't continue authentication until 2FA is completed
+      }
+
+      // Success: proceed with service ticket
       const ticketResult = await this.casClient.getServiceTicket(loginResult.tgt, 'xapi5');
       serviceTicket = ticketResult.serviceTicket;
     } else {
@@ -437,6 +455,42 @@ export class XTBWebSocketClient extends EventEmitter {
     this.emit('authenticated', this.loginResult);
 
     return this.loginResult;
+  }
+
+  /**
+   * Submit two-factor authentication code to complete login.
+   *
+   * Call this method when you receive a 'requires_2fa' event.
+   * If successful, authentication will continue automatically.
+   *
+   * @param sessionId - Session ID from 'requires_2fa' event
+   * @param code - 6-digit OTP code from authenticator app, SMS, or email
+   * @returns Promise that resolves when authentication completes
+   * @throws Error if 2FA code is invalid, expired, or rate limited
+   */
+  async submitTwoFactorCode(sessionId: string, code: string): Promise<void> {
+    if (!this.casClient) {
+      throw new Error('No CAS client available - authentication not started');
+    }
+
+    const twoFactorResult = await this.casClient.loginWithTwoFactor(sessionId, code);
+
+    if (twoFactorResult.type === 'requires_2fa') {
+      // Still requires 2FA (could happen with certain error conditions)
+      this.emit('requires_2fa', {
+        sessionId: twoFactorResult.sessionId,
+        methods: twoFactorResult.methods,
+        expiresAt: twoFactorResult.expiresAt,
+      });
+      return;
+    }
+
+    // Success: continue with service ticket generation
+    const ticketResult = await this.casClient.getServiceTicket(twoFactorResult.tgt, 'xapi5');
+
+    // Complete the authentication flow
+    await this.registerClientInfo();
+    await this.loginWithServiceTicket(ticketResult.serviceTicket);
   }
 
   // ─── High-level API (mirrors browser-client interface) ───

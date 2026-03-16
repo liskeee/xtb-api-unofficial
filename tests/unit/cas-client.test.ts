@@ -14,11 +14,19 @@ describe('CASClient', () => {
 
   it('validates TGT expiration', () => {
     const client = new CASClient();
-    
-    const valid = { tgt: 'TGT-test', expiresAt: Date.now() + 3600000 };
+
+    const valid = {
+      type: 'success' as const,
+      tgt: 'TGT-test',
+      expiresAt: Date.now() + 3600000
+    };
     expect(client.isTgtValid(valid)).toBe(true);
 
-    const expired = { tgt: 'TGT-test', expiresAt: Date.now() - 1000 };
+    const expired = {
+      type: 'success' as const,
+      tgt: 'TGT-test',
+      expiresAt: Date.now() - 1000
+    };
     expect(client.isTgtValid(expired)).toBe(false);
   });
 });

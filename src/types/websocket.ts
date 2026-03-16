@@ -1,5 +1,5 @@
 import type { INewMarketOrderEvent } from './trading.js';
-import type { CASLoginResult, CASServiceTicketResult } from '../auth/index.js';
+import type { CASServiceTicketResult } from '../auth/index.js';
 
 /**
  * CoreAPI command payload sent via WebSocket.
@@ -421,4 +421,59 @@ export interface WSPushMessage extends WSResponse {
       };
     };
   }>;
+}
+
+/**
+ * CAS login phase types.
+ *
+ * Indicates current status of CAS authentication flow.
+ */
+export type LoginPhase = 'TGT_CREATED' | 'TWO_FACTOR_REQUIRED';
+
+/**
+ * Successful CAS login result.
+ *
+ * Contains TGT (Ticket Granting Ticket) ready for service ticket generation.
+ */
+export interface CASLoginSuccess {
+  type: 'success';
+  /** Ticket Granting Ticket for service ticket requests */
+  tgt: string;
+  /** TGT expiration timestamp */
+  expiresAt: number;
+}
+
+/**
+ * CAS login requiring two-factor authentication.
+ *
+ * User must provide OTP code using one of the available methods.
+ */
+export interface CASLoginTwoFactorRequired {
+  type: 'requires_2fa';
+  /** Session ID for 2FA submission */
+  sessionId: string;
+  /** Available 2FA methods (TOTP, SMS, EMAIL) */
+  methods: Array<'TOTP' | 'SMS' | 'EMAIL'>;
+  /** Session expiration timestamp */
+  expiresAt: number;
+}
+
+/**
+ * Union type for CAS login results.
+ *
+ * Either successful login with TGT or 2FA challenge requiring OTP code.
+ */
+export type CASLoginResult = CASLoginSuccess | CASLoginTwoFactorRequired;
+
+/**
+ * CAS-specific error with error codes from XTB servers.
+ *
+ * Common codes: CAS_GET_TGT_UNAUTHORIZED, CAS_GET_TGT_TOO_MANY_OTP_ERROR,
+ * CAS_GET_TGT_OTP_LIMIT_REACHED_ERROR, CAS_GET_TGT_OTP_ACCESS_BLOCKED_ERROR
+ */
+export class CASError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+    this.name = 'CASError';
+  }
 }

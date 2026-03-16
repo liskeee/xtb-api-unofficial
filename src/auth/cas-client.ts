@@ -3,11 +3,10 @@
  * Handles the complete auth flow: login → TGT → Service Ticket → WebSocket login.
  */
 
-export interface CASLoginResult {
-  tgt: string;
-  /** TGT expires after this timestamp */
-  expiresAt: number;
-}
+import { createHash } from 'crypto';
+import type { CASLoginResult } from '../types/websocket.js';
+import { CASError } from '../types/websocket.js';
+
 
 export interface CASServiceTicketResult {
   serviceTicket: string;
@@ -43,54 +42,226 @@ export class CASClient {
   }
 
   /**
-   * Login with email/password to get TGT (Ticket Granting Ticket).
+   * Login with email/password using CAS v2 with v1 fallback.
+   *
+   * Tries CAS v2 first (supports 2FA), falls back to CAS v1 (no 2FA) if v2 unavailable.
    *
    * @param email - XTB account email
    * @param password - XTB account password
-   * @returns TGT and expiration timestamp
+   * @returns Either success with TGT or 2FA challenge requiring OTP code
+   * @throws CASError if credentials invalid, account blocked, or service unavailable
    */
   async login(email: string, password: string): Promise<CASLoginResult> {
-    const loginUrl = new URL('login', this.config.baseUrl);
+    try {
+      // Try CAS v2 first (supports 2FA)
+      return await this.loginV2(email, password);
+    } catch (error) {
+      // If v2 fails due to service issues (not auth), try v1 fallback
+      if (error instanceof CASError && !error.code.includes('UNAUTHORIZED')) {
+        try {
+          return await this.loginV1(email, password);
+        } catch (v1Error) {
+          // If both fail, throw the original v2 error
+          throw error;
+        }
+      }
+      throw error;
+    }
+  }
 
-    const formData = new URLSearchParams({
-      username: email,
-      password: password,
-      lt: '', // CAS Login Ticket - usually auto-generated
-      execution: 'e1s1',
-      _eventId: 'submit',
+  /**
+   * Login with email/password using CAS v2.
+   *
+   * @param email - XTB account email
+   * @param password - XTB account password
+   * @returns Either success with TGT or 2FA challenge requiring OTP code
+   * @throws CASError if credentials invalid, account blocked, or service unavailable
+   */
+  private async loginV2(email: string, password: string): Promise<CASLoginResult> {
+    const ticketsUrl = new URL('v2/tickets', this.config.baseUrl);
+    const userAgent = 'xStation5/2.94.1 (Linux x86_64)';
+    const fingerprint = this.generateFingerprint(userAgent);
+
+    const payload = {
+      username: email,         // [REDACTED] - user email
+      password: password,      // [REDACTED] - user password
+      fingerprint,
+      rememberMe: false,
+    };
+
+    const response = await fetch(ticketsUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Time-Zone': this.config.timezoneOffset,
+        'User-Agent': userAgent,
+      },
+      body: JSON.stringify(payload),
     });
 
-    const response = await fetch(loginUrl.toString(), {
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new CASError('CAS_GET_TGT_UNAUTHORIZED', 'Invalid credentials');
+      }
+      const errorText = await response.text();
+      throw new CASError('CAS_LOGIN_FAILED', `CAS v2 login failed: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    // Handle success case (no 2FA required)
+    if (result.loginPhase === 'TGT_CREATED' && result.ticket) {
+      const tgt = result.ticket;
+      const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
+
+      return {
+        type: 'success',
+        tgt,
+        expiresAt,
+      };
+    }
+
+    // Handle 2FA required case
+    if (result.loginPhase === 'TWO_FACTOR_REQUIRED' && result.sessionId) {
+      const sessionExpiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes for 2FA session
+
+      return {
+        type: 'requires_2fa',
+        sessionId: result.sessionId,
+        methods: result.methods || ['TOTP'],
+        expiresAt: sessionExpiresAt,
+      };
+    }
+
+    // Handle specific error codes from XTB
+    if (result.code) {
+      switch (result.code) {
+        case 'CAS_GET_TGT_UNAUTHORIZED':
+          throw new CASError(result.code, 'Invalid email or password');
+        case 'CAS_GET_TGT_TOO_MANY_OTP_ERROR':
+          throw new CASError(result.code, `Too many OTP attempts. Wait ${result.data?.otpThrottleTimeRemaining || 60}s`);
+        case 'CAS_GET_TGT_OTP_LIMIT_REACHED_ERROR':
+          throw new CASError(result.code, 'OTP attempt limit reached. Try again later');
+        case 'CAS_GET_TGT_OTP_ACCESS_BLOCKED_ERROR':
+          throw new CASError(result.code, 'Account temporarily blocked due to too many failed OTP attempts');
+        default:
+          throw new CASError(result.code, result.message || 'CAS login failed');
+      }
+    }
+
+    throw new CASError('CAS_UNEXPECTED_RESPONSE', `Unexpected login response: ${JSON.stringify(result)}`);
+  }
+
+  /**
+   * Login using CAS v1 (fallback method, no 2FA support).
+   *
+   * @param email - XTB account email
+   * @param password - XTB account password
+   * @returns Success result with TGT (v1 doesn't support 2FA)
+   * @throws CASError if credentials invalid or service unavailable
+   */
+  private async loginV1(email: string, password: string): Promise<CASLoginResult> {
+    const ticketsUrl = new URL('v1/tickets', this.config.baseUrl);
+
+    const formData = new URLSearchParams({
+      username: email,     // [REDACTED] - user email
+      password: password,  // [REDACTED] - user password
+    });
+
+    const response = await fetch(ticketsUrl.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'xStation5/2.94.1 (Linux x86_64)',
       },
       body: formData,
-      redirect: 'manual', // Don't follow redirects to capture cookies
+      redirect: 'manual', // Don't follow redirects to extract Location header
+    });
+
+    if (response.status === 201) {
+      // Success: Extract TGT from Location header
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new CASError('CAS_V1_NO_LOCATION', 'CAS v1 login succeeded but no Location header found');
+      }
+
+      // Extract TGT from Location: .../v1/tickets/TGT-xxx → "TGT-xxx"
+      const tgtMatch = location.match(/\/tickets\/([^\/]+)$/);
+      if (!tgtMatch) {
+        throw new CASError('CAS_V1_INVALID_LOCATION', `CAS v1 Location header format invalid: ${location}`);
+      }
+
+      const tgt = tgtMatch[1];
+      const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
+
+      return {
+        type: 'success',
+        tgt,
+        expiresAt,
+      };
+    }
+
+    if (response.status === 401) {
+      throw new CASError('CAS_GET_TGT_UNAUTHORIZED', 'Invalid credentials');
+    }
+
+    const errorText = await response.text();
+    throw new CASError('CAS_V1_LOGIN_FAILED', `CAS v1 login failed: ${response.status} ${errorText}`);
+  }
+
+  /**
+   * Submit two-factor authentication code to complete login.
+   *
+   * @param sessionId - Session ID from initial login response
+   * @param code - OTP code (6 digits from TOTP/SMS/EMAIL)
+   * @returns TGT and expiration timestamp if successful, or new 2FA challenge
+   * @throws CASError if code is invalid, rate limited, or account blocked
+   */
+  async loginWithTwoFactor(sessionId: string, code: string): Promise<CASLoginResult> {
+    const twoFactorUrl = new URL('v2/tickets/two-factor', this.config.baseUrl);
+
+    const payload = {
+      sessionId, // [REDACTED] - session ID for 2FA
+      code,      // [REDACTED] - OTP code
+    };
+
+    const userAgent = 'xStation5/2.94.1 (Linux x86_64)';
+    const fingerprint = this.generateFingerprint(userAgent);
+
+    const response = await fetch(twoFactorUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Time-Zone': this.config.timezoneOffset,
+        'User-Agent': userAgent,
+      },
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-      throw new Error(`CAS login failed: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new CASError('CAS_2FA_REQUEST_FAILED', `2FA request failed: ${response.status} ${errorText}`);
     }
 
-    // Extract TGT from Set-Cookie header (CASTGC cookie)
-    const cookies = response.headers.get('set-cookie');
-    if (!cookies) {
-      throw new Error('No cookies returned from CAS login - authentication failed');
+    const result = await response.json();
+
+    if (result.loginPhase === 'TGT_CREATED' && result.ticket) {
+      const tgt = result.ticket;
+      const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
+
+      return {
+        type: 'success',
+        tgt,
+        expiresAt,
+      };
     }
 
-    const castgcMatch = cookies.match(/CASTGC=([^;]+)/);
-    if (!castgcMatch) {
-      throw new Error('CASTGC cookie not found - authentication failed');
+    // Handle other error cases
+    if (result.code) {
+      throw new CASError(result.code, result.message || 'Two-factor authentication failed');
     }
 
-    const tgt = castgcMatch[1];
-
-    // TGT typically expires in 8-12 hours, estimate 8 hours
-    const expiresAt = Date.now() + 8 * 60 * 60 * 1000;
-
-    return { tgt, expiresAt };
+    throw new CASError('CAS_2FA_UNEXPECTED_RESPONSE', `Unexpected 2FA response: ${JSON.stringify(result)}`);
   }
 
   /**
@@ -126,12 +297,16 @@ export class CASClient {
     });
 
     if (!response.ok) {
-      throw new Error(`CAS v1 service ticket request failed: ${response.status} ${response.statusText}`);
+      if (response.status === 401) {
+        throw new CASError('CAS_TGT_EXPIRED', 'TGT has expired or is invalid');
+      }
+      const errorText = await response.text();
+      throw new CASError('CAS_SERVICE_TICKET_FAILED', `CAS v1 service ticket request failed: ${response.status} ${errorText}`);
     }
 
     const serviceTicket = await response.text();
     if (!serviceTicket || !serviceTicket.startsWith('ST-')) {
-      throw new Error(`Invalid service ticket received: ${serviceTicket}`);
+      throw new CASError('CAS_INVALID_SERVICE_TICKET', `Invalid service ticket received: ${serviceTicket}`);
     }
 
     return { serviceTicket: serviceTicket.trim(), service };
@@ -159,17 +334,44 @@ export class CASClient {
     });
 
     if (!response.ok) {
-      throw new Error(`CAS v2 service ticket request failed: ${response.status} ${response.statusText}`);
+      if (response.status === 401) {
+        throw new CASError('CAS_TGT_EXPIRED', 'TGT has expired or is invalid');
+      }
+      const errorText = await response.text();
+      throw new CASError('CAS_SERVICE_TICKET_FAILED', `CAS v2 service ticket request failed: ${response.status} ${errorText}`);
     }
 
     const result = await response.json();
     const serviceTicket = result.serviceTicket || result.ticket;
 
     if (!serviceTicket || !serviceTicket.startsWith('ST-')) {
-      throw new Error(`Invalid service ticket received: ${serviceTicket}`);
+      throw new CASError('CAS_INVALID_SERVICE_TICKET', `Invalid service ticket received: ${serviceTicket}`);
     }
 
     return { serviceTicket, service };
+  }
+
+  /**
+   * Refresh service ticket using existing TGT.
+   *
+   * Service tickets are single-use and expire after 2-5 minutes.
+   * Use this method to get a fresh ST when the previous one is expired.
+   *
+   * @param tgt - Valid Ticket Granting Ticket
+   * @param service - Service name (default: 'xapi5')
+   * @returns Fresh service ticket
+   * @throws CASError if TGT is invalid or expired
+   */
+  async refreshServiceTicket(tgt: string, service = 'xapi5'): Promise<string> {
+    try {
+      const result = await this.getServiceTicket(tgt, service);
+      return result.serviceTicket;
+    } catch (error) {
+      if (error instanceof CASError && error.code === 'CAS_TGT_EXPIRED') {
+        throw new CASError('CAS_TGT_EXPIRED', 'TGT has expired, please login again');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -178,6 +380,15 @@ export class CASClient {
    */
   isTgtValid(tgtResult: CASLoginResult): boolean {
     return Date.now() < tgtResult.expiresAt;
+  }
+
+  /**
+   * Extract TGT from successful login result.
+   * @param loginResult - Result from login() method
+   * @returns TGT string if login was successful, null if 2FA required
+   */
+  getTgtFromResult(loginResult: CASLoginResult): string | null {
+    return loginResult.type === 'success' ? loginResult.tgt : null;
   }
 
   /**
@@ -191,5 +402,14 @@ export class CASClient {
     const hours = String(Math.floor(absOffset / 60)).padStart(2, '0');
     const minutes = String(absOffset % 60).padStart(2, '0');
     return `${sign}${hours}${minutes}`;
+  }
+
+  /**
+   * Generate fingerprint (SHA-256 hash) from user agent.
+   * Required by CAS v2 for improved security and reliability.
+   */
+  private generateFingerprint(userAgent: string): string {
+    // [REDACTED] - fingerprint generation for security
+    return createHash('sha256').update(userAgent).digest('hex').toUpperCase();
   }
 }
