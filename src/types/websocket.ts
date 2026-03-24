@@ -456,12 +456,16 @@ export interface CASLoginSuccess {
  */
 export interface CASLoginTwoFactorRequired {
   type: 'requires_2fa';
-  /** Session ID for 2FA submission */
+  /** Login ticket (MID-xxx token) for 2FA submission */
+  loginTicket: string;
+  /** Session ID for backward compatibility (may equal loginTicket) */
   sessionId: string;
   /** Available 2FA methods (TOTP, SMS, EMAIL) */
   methods: Array<'TOTP' | 'SMS' | 'EMAIL'>;
   /** Session expiration timestamp */
   expiresAt: number;
+  /** Two-factor auth type (default: 'SMS') */
+  twoFactorAuthType?: string;
 }
 
 /**

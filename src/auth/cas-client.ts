@@ -125,14 +125,17 @@ export class CASClient {
     }
 
     // Handle 2FA required case
-    if (result.loginPhase === 'TWO_FACTOR_REQUIRED' && result.sessionId) {
+    if (result.loginPhase === 'TWO_FACTOR_REQUIRED' && (result.loginTicket || result.sessionId)) {
       const sessionExpiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes for 2FA session
+      const loginTicket = result.loginTicket || result.sessionId;
 
       return {
         type: 'requires_2fa',
-        sessionId: result.sessionId,
+        loginTicket,
+        sessionId: result.sessionId || loginTicket, // backward compat
         methods: result.methods || ['TOTP'],
         expiresAt: sessionExpiresAt,
+        twoFactorAuthType: result.twoFactorAuthType || 'SMS',
       };
     }
 
@@ -215,23 +218,29 @@ export class CASClient {
   /**
    * Submit two-factor authentication code to complete login.
    *
-   * @param sessionId - Session ID from initial login response
+   * Uses the SAME v2/tickets endpoint as login, with loginTicket + token payload.
+   *
+   * @param loginTicket - Login ticket (MID-xxx) from initial login response
    * @param code - OTP code (6 digits from TOTP/SMS/EMAIL)
+   * @param twoFactorAuthType - 2FA method type (default: 'SMS')
    * @returns TGT and expiration timestamp if successful, or new 2FA challenge
    * @throws CASError if code is invalid, rate limited, or account blocked
    */
-  async loginWithTwoFactor(sessionId: string, code: string): Promise<CASLoginResult> {
-    const twoFactorUrl = new URL('v2/tickets/two-factor', this.config.baseUrl);
-
-    const payload = {
-      sessionId, // [REDACTED] - session ID for 2FA
-      code,      // [REDACTED] - OTP code
-    };
+  async loginWithTwoFactor(loginTicket: string, code: string, twoFactorAuthType = 'SMS'): Promise<CASLoginResult> {
+    // 2FA uses the SAME endpoint as login (v2/tickets), NOT v2/tickets/two-factor
+    const ticketsUrl = new URL('v2/tickets', this.config.baseUrl);
 
     const userAgent = this.config.userAgent;
     const fingerprint = this.generateFingerprint(userAgent);
 
-    const response = await fetch(twoFactorUrl.toString(), {
+    const payload = {
+      loginTicket,        // MID-xxx token from initial login
+      token: code,        // OTP code
+      fingerprint,
+      twoFactorAuthType,  // "SMS", "TOTP", "EMAIL"
+    };
+
+    const response = await fetch(ticketsUrl.toString(), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -249,7 +258,17 @@ export class CASClient {
     const result = await response.json();
 
     if (result.loginPhase === 'TGT_CREATED' && result.ticket) {
-      const tgt = result.ticket;
+      let tgt = result.ticket;
+
+      // Also check Set-Cookie header for CASTGT as fallback
+      const setCookie = response.headers.get('set-cookie');
+      if (setCookie) {
+        const castgtMatch = setCookie.match(/CASTGT=([^;]+)/);
+        if (castgtMatch && !tgt) {
+          tgt = castgtMatch[1];
+        }
+      }
+
       const expiresAt = Date.now() + 8 * 60 * 60 * 1000; // 8 hours
 
       return {
@@ -399,12 +418,9 @@ export class CASClient {
    * Example: "+0100" for GMT+1, "-0500" for GMT-5
    */
   private getTimezoneOffset(): string {
-    const offset = new Date().getTimezoneOffset();
-    const sign = offset <= 0 ? '+' : '-';
-    const absOffset = Math.abs(offset);
-    const hours = String(Math.floor(absOffset / 60)).padStart(2, '0');
-    const minutes = String(absOffset % 60).padStart(2, '0');
-    return `${sign}${hours}${minutes}`;
+    // Browser sends Time-Zone header as minutes offset (e.g. "60" for CET, "-300" for EST)
+    // getTimezoneOffset() returns -60 for CET, we need positive → negate it
+    return String(-new Date().getTimezoneOffset());
   }
 
   /**

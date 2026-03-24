@@ -99,8 +99,10 @@ describe('CASClient 2FA Authentication', () => {
         ok: true,
         json: async () => ({
           loginPhase: 'TWO_FACTOR_REQUIRED',
+          loginTicket: 'MID-abc123',
           sessionId: 'session-123',
-          methods: ['TOTP', 'SMS']
+          methods: ['TOTP', 'SMS'],
+          twoFactorAuthType: 'SMS'
         })
       } as Response);
 
@@ -108,9 +110,11 @@ describe('CASClient 2FA Authentication', () => {
 
       expect(result.type).toBe('requires_2fa');
       if (result.type === 'requires_2fa') {
+        expect(result.loginTicket).toBe('MID-abc123');
         expect(result.sessionId).toBe('session-123');
         expect(result.methods).toEqual(['TOTP', 'SMS']);
         expect(result.expiresAt).toBeGreaterThan(Date.now());
+        expect(result.twoFactorAuthType).toBe('SMS');
       }
     });
 
@@ -242,33 +246,82 @@ describe('CASClient 2FA Authentication', () => {
   });
 
   describe('Two-Factor Authentication', () => {
-    it('submits 2FA code successfully', async () => {
+    it('submits 2FA code to v2/tickets with loginTicket payload', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: { get: () => null },
         json: async () => ({
           loginPhase: 'TGT_CREATED',
           ticket: 'TGT-2fa-success'
         })
-      } as Response);
+      } as unknown as Response);
 
-      const result = await client.loginWithTwoFactor('session-123', '123456');
+      const result = await client.loginWithTwoFactor('MID-abc123', '123456');
 
       expect(result.type).toBe('success');
       if (result.type === 'success') {
         expect(result.tgt).toBe('TGT-2fa-success');
+      }
+
+      // Verify it calls v2/tickets (NOT v2/tickets/two-factor)
+      const callUrl = mockFetch.mock.calls[0][0] as string;
+      expect(callUrl).toContain('v2/tickets');
+      expect(callUrl).not.toContain('two-factor');
+
+      // Verify payload uses loginTicket and token (not sessionId and code)
+      const callBody = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
+      expect(callBody.loginTicket).toBe('MID-abc123');
+      expect(callBody.token).toBe('123456');
+      expect(callBody.twoFactorAuthType).toBe('SMS');
+      expect(callBody.fingerprint).toBeDefined();
+    });
+
+    it('uses custom twoFactorAuthType', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({
+          loginPhase: 'TGT_CREATED',
+          ticket: 'TGT-2fa-totp'
+        })
+      } as unknown as Response);
+
+      await client.loginWithTwoFactor('MID-abc123', '123456', 'TOTP');
+
+      const callBody = JSON.parse((mockFetch.mock.calls[0][1] as RequestInit).body as string);
+      expect(callBody.twoFactorAuthType).toBe('TOTP');
+    });
+
+    it('extracts TGT from Set-Cookie header as fallback', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        headers: { get: (name: string) => name === 'set-cookie' ? 'CASTGT=TGT-from-cookie; Path=/' : null },
+        json: async () => ({
+          loginPhase: 'TGT_CREATED',
+          ticket: 'TGT-from-body'
+        })
+      } as unknown as Response);
+
+      const result = await client.loginWithTwoFactor('MID-abc123', '123456');
+
+      // Body ticket takes priority
+      expect(result.type).toBe('success');
+      if (result.type === 'success') {
+        expect(result.tgt).toBe('TGT-from-body');
       }
     });
 
     it('handles invalid 2FA code', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
+        headers: { get: () => null },
         json: async () => ({
           code: 'CAS_GET_TGT_OTP_INVALID',
           message: 'Invalid OTP code'
         })
-      } as Response);
+      } as unknown as Response);
 
-      await expect(client.loginWithTwoFactor('session-123', 'invalid'))
+      await expect(client.loginWithTwoFactor('MID-abc123', 'invalid'))
         .rejects.toThrow('Invalid OTP code');
     });
 
@@ -279,7 +332,7 @@ describe('CASClient 2FA Authentication', () => {
         text: async () => 'Bad Request'
       } as Response);
 
-      await expect(client.loginWithTwoFactor('session-123', '123456'))
+      await expect(client.loginWithTwoFactor('MID-abc123', '123456'))
         .rejects.toThrow('2FA request failed: 400');
     });
   });
@@ -325,6 +378,7 @@ describe('CASClient 2FA Authentication', () => {
     it('validates 2FA session expiration', () => {
       const twoFactorResult = {
         type: 'requires_2fa' as const,
+        loginTicket: 'MID-abc123',
         sessionId: 'session-123',
         methods: ['TOTP'] as const,
         expiresAt: Date.now() + 300000 // 5 minutes
@@ -349,6 +403,7 @@ describe('CASClient 2FA Authentication', () => {
     it('returns null for 2FA result', () => {
       const twoFactorResult = {
         type: 'requires_2fa' as const,
+        loginTicket: 'MID-abc123',
         sessionId: 'session-123',
         methods: ['TOTP'] as const,
         expiresAt: Date.now() + 300000

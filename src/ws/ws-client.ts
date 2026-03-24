@@ -74,7 +74,7 @@ export interface XTBWebSocketClient {
    * Emitted when two-factor authentication is required.
    * @param sessionData - 2FA session data with sessionId and available methods
    */
-  on(event: 'requires_2fa', listener: (sessionData: { sessionId: string; methods: string[]; expiresAt: number }) => void): this;
+  on(event: 'requires_2fa', listener: (sessionData: { loginTicket: string; sessionId: string; methods: string[]; expiresAt: number; twoFactorAuthType?: string }) => void): this;
 }
 
 /**
@@ -261,9 +261,11 @@ export class XTBWebSocketClient extends EventEmitter {
       if (loginResult.type === 'requires_2fa') {
         // Emit 2FA required event and wait for user to provide code
         this.emit('requires_2fa', {
-          sessionId: loginResult.sessionId,
+          loginTicket: loginResult.loginTicket,
+          sessionId: loginResult.sessionId, // backward compat
           methods: loginResult.methods,
           expiresAt: loginResult.expiresAt,
+          twoFactorAuthType: loginResult.twoFactorAuthType,
         });
         return; // Don't continue authentication until 2FA is completed
       }
@@ -466,24 +468,27 @@ export class XTBWebSocketClient extends EventEmitter {
    * Call this method when you receive a 'requires_2fa' event.
    * If successful, authentication will continue automatically.
    *
-   * @param sessionId - Session ID from 'requires_2fa' event
+   * @param loginTicket - Login ticket (MID-xxx) from 'requires_2fa' event
    * @param code - 6-digit OTP code from authenticator app, SMS, or email
+   * @param twoFactorAuthType - 2FA method type (default: 'SMS')
    * @returns Promise that resolves when authentication completes
    * @throws Error if 2FA code is invalid, expired, or rate limited
    */
-  async submitTwoFactorCode(sessionId: string, code: string): Promise<void> {
+  async submitTwoFactorCode(loginTicket: string, code: string, twoFactorAuthType = 'SMS'): Promise<void> {
     if (!this.casClient) {
       throw new Error('No CAS client available - authentication not started');
     }
 
-    const twoFactorResult = await this.casClient.loginWithTwoFactor(sessionId, code);
+    const twoFactorResult = await this.casClient.loginWithTwoFactor(loginTicket, code, twoFactorAuthType);
 
     if (twoFactorResult.type === 'requires_2fa') {
       // Still requires 2FA (could happen with certain error conditions)
       this.emit('requires_2fa', {
+        loginTicket: twoFactorResult.loginTicket,
         sessionId: twoFactorResult.sessionId,
         methods: twoFactorResult.methods,
         expiresAt: twoFactorResult.expiresAt,
+        twoFactorAuthType: twoFactorResult.twoFactorAuthType,
       });
       return;
     }
