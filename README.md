@@ -18,6 +18,7 @@ Unofficial TypeScript/Node.js client for XTB's xStation5 trading platform.
 - 📊 **Real-time Data** — Live quotes, positions, balance via push events
 - 💹 **Trading** — Buy/sell market orders with SL/TP
 - 🔍 **Instrument Search** — Access to 11,888+ instruments
+- ⚡ **gRPC-web Mode** — Direct trading via Chrome DevTools Protocol (fastest)
 - 📦 **TypeScript** — Full type safety
 
 ## Install
@@ -135,6 +136,40 @@ Symbols use the format `{assetClassId}_{symbolName}_{groupId}`:
 | Real | `wss://api5reala.x-station.eu/v1/xstation` |
 | Demo | `wss://api5demoa.x-station.eu/v1/xstation` |
 
+### gRPC-web Mode
+
+Trades via the xStation5 gRPC-web backend (ipax.xtb.com) through Chrome DevTools Protocol.
+Requires Chrome with xStation5 open and remote debugging enabled:
+
+```bash
+google-chrome --remote-debugging-port=18800 https://xstation5.xtb.com
+```
+
+```typescript
+import { GrpcClient, CASClient } from 'xtb-api-unofficial';
+
+// 1. Get TGT via CAS authentication
+const cas = new CASClient({ email: 'user@example.com', password: 'password' });
+const { tgt } = await cas.getServiceTicket();
+
+// 2. Connect gRPC client to Chrome
+const grpc = new GrpcClient({
+  cdpUrl: 'http://localhost:18800',
+  accountNumber: '51984891',
+  accountServer: 'XS-real1',
+});
+await grpc.connect();
+
+// 3. Get JWT with account scope
+const jwt = await grpc.getJwt(tgt);
+
+// 4. Execute trades (USE WITH CAUTION!)
+// const result = await grpc.buy(9438, 1);   // BUY 1x CIG.PL
+// const result = await grpc.sell(9438, 2);  // SELL 2x CIG.PL
+
+await grpc.disconnect();
+```
+
 ## Architecture
 
 ```
@@ -142,6 +177,7 @@ src/
   auth/          CAS authentication (TGT → Service Ticket)
   browser/       Chrome DevTools Protocol client (Playwright)
   ws/            WebSocket CoreAPI client
+  grpc/          gRPC-web trading via CDP (ipax.xtb.com)
   types/         TypeScript interfaces & enums
   client.ts      Unified high-level client
   utils.ts       Price/volume conversion helpers

@@ -7,3 +7,6 @@ export { CASClient } from './auth/index.js';
 export type { CASServiceTicketResult, CASClientConfig } from './auth/index.js';
 export * from './types/index.js';
 export { priceFromDecimal, priceToDecimal, volumeFrom, generateReqId, buildAccountId, parseSymbolKey } from './utils.js';
+export { GrpcClient } from './grpc/index.js';
+export type { GrpcClientConfig, GrpcTradeResult } from './grpc/index.js';
+export { Side } from './grpc/index.js';
